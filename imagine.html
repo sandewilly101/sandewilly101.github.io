@@ -1,0 +1,542 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Water Pouring Game - Chase the Bottle!</title>
+  <style>
+    html,body { margin: 0; height: 100%; overflow: hidden; background: #0a0a0f; }
+    #app { width: 100vw; height: 100vh; display: block; }
+    .controls {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      background: rgba(0,0,0,0.75);
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      backdrop-filter: blur(10px);
+      z-index: 100;
+    }
+    .controls h3 { margin: 0 0 12px 0; font-size: 18px; }
+    .controls button {
+      background: #2a7fff;
+      border: none;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 4px 0;
+      width: 100%;
+    }
+    .controls button:hover { background: #3d8fff; }
+    .info { margin-top: 12px; font-size: 12px; opacity: 0.8; line-height: 1.6; }
+    .score {
+      margin-top: 12px;
+      padding: 12px;
+      background: rgba(42, 127, 255, 0.2);
+      border-radius: 6px;
+      border: 2px solid #2a7fff;
+    }
+    .score-value { font-size: 24px; font-weight: bold; color: #4fc3f7; }
+    .game-mode { color: #4fc3f7; font-weight: bold; font-size: 16px; margin-bottom: 8px; }
+    .difficulty { margin-top: 8px; }
+    .difficulty select {
+      margin-top: 4px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid #4fc3f7;
+      background: #1a2233;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      width: 100%;
+    }
+    .difficulty select:focus { outline: none; border-color: #2a7fff; }
+  </style>
+  <script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.158.0/build/three.module.js", "three/": "https://unpkg.com/three@0.158.0/" } }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="controls">
+    <h3> Prototype</h3>
+    <div class="game-mode">Drag the glass to catch water</div>
+    <div class="score">
+      <div>Points: <span class="score-value" id="pointsValue">0</span></div>
+      <div style="font-size:14px;margin-top:6px;">Accuracy: <span id="scoreValue">0%</span></div>
+    </div>
+    <div class="difficulty">
+      <label><strong>Difficulty:</strong>
+        <select id="diffSelect">
+          <option value="easy">Easy (Slow)</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard (Fast)</option>
+        </select>
+      </label>
+    </div>
+    <button id="toggleBtn">⏸ Stop Pouring</button>
+    <button id="resetBtn">🔄 Reset Game</button>
+    <div class="info">Drag the glass to catch the pouring water!<br>The bottle moves randomly - stay under it!</div>
+  </div>
+
+  <script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+  const container = document.getElementById('app');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x2a3142);
+  scene.fog = new THREE.Fog(0x2a3142, 8, 20);
+
+  const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 100);
+  camera.position.set(0, 4, 5);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  container.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0.7, 0);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.maxPolarAngle = Math.PI / 2 + 0.2;
+  controls.update();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  mainLight.position.set(5, 8, 3);
+  mainLight.castShadow = true;
+  mainLight.shadow.mapSize.set(2048, 2048);
+  mainLight.shadow.camera.near = 0.5;
+  mainLight.shadow.camera.far = 20;
+  mainLight.shadow.camera.left = mainLight.shadow.camera.bottom = -5;
+  mainLight.shadow.camera.right = mainLight.shadow.camera.top = 5;
+  scene.add(mainLight);
+  scene.add(new THREE.DirectionalLight(0x7ab8ff, 0.3).translateX(-3).translateY(4).translateZ(-2));
+  scene.add(new THREE.PointLight(0xffffff, 0.5, 10).translateX(-2).translateY(1).translateZ(2));
+
+  // Ground with grid pattern
+  const groundGeom = new THREE.CircleGeometry(10, 64);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x1e2738, roughness: 0.8, metalness: 0.2 });
+  const ground = new THREE.Mesh(groundGeom, groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Play area boundary indicator
+  const boundaryGeom = new THREE.RingGeometry(2.4, 2.5, 64);
+  const boundaryMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.3 });
+  const boundary = new THREE.Mesh(boundaryGeom, boundaryMat);
+  boundary.rotation.x = -Math.PI/2;
+  boundary.position.y = 0.01;
+  scene.add(boundary);
+
+  // Game Stats
+  let totalDropsSpawned = 0, dropsCaught = 0, dropsSpilled = 0, points = 0;
+  function updateScore() {
+    const pct = totalDropsSpawned > 0 ? Math.round((dropsCaught / totalDropsSpawned) * 100) : 0;
+    document.getElementById('scoreValue').textContent = pct + '%';
+    document.getElementById('pointsValue').textContent = points;
+  }
+
+  // Glass
+  const glassRadius = 0.38, glassHeight = 1.1, glassThickness = 0.03;
+  const glass = new THREE.Group();
+
+  const outerGlass = new THREE.Mesh(
+    new THREE.CylinderGeometry(glassRadius, glassRadius * 0.85, glassHeight, 64, 1, true),
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0, roughness: 0.02, transmission: 0.98, thickness: 0.5, transparent: true, opacity: 0.15, ior: 1.52, clearcoat: 1 })
+  );
+  outerGlass.position.y = glassHeight/2 + 0.05;
+  outerGlass.castShadow = true;
+  glass.add(outerGlass);
+
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(glassRadius * 0.85, glassRadius * 0.9, 0.08, 64),
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.1, roughness: 0.1, transmission: 0.9, thickness: 0.3, transparent: true })
+  );
+  base.position.y = 0.04;
+  glass.add(base);
+
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(glassRadius - 0.01, 0.015, 16, 64),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.3, roughness: 0.2, emissive: 0x333333 })
+  );
+  rim.rotation.x = Math.PI/2;
+  rim.position.y = glassHeight + 0.05;
+  glass.add(rim);
+
+  glass.position.set(0, 0, 0);
+  scene.add(glass);
+
+  // Glass dragging
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  let isDraggingGlass = false;
+  const dragOffset = new THREE.Vector3();
+
+  function onMouseDown(e) {
+    mouse.x = (e.clientX / innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    if (raycaster.intersectObjects(glass.children, true).length > 0) {
+      isDraggingGlass = true;
+      controls.enabled = false;
+      const pt = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, pt);
+      dragOffset.copy(glass.position).sub(pt);
+      document.body.style.cursor = 'grabbing';
+    }
+  }
+
+  function onMouseMove(e) {
+    mouse.x = (e.clientX / innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+    if (isDraggingGlass) {
+      raycaster.setFromCamera(mouse, camera);
+      const pt = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(plane, pt)) {
+        glass.position.x = Math.max(-2.5, Math.min(2.5, pt.x + dragOffset.x));
+        glass.position.z = Math.max(-2.5, Math.min(2.5, pt.z + dragOffset.z));
+        if (waterMesh) { waterMesh.position.x = glass.position.x; waterMesh.position.z = glass.position.z; }
+      }
+    } else {
+      raycaster.setFromCamera(mouse, camera);
+      document.body.style.cursor = raycaster.intersectObjects(glass.children, true).length > 0 ? 'grab' : 'default';
+    }
+  }
+
+  function onMouseUp() {
+    if (isDraggingGlass) { isDraggingGlass = false; controls.enabled = true; document.body.style.cursor = 'default'; }
+  }
+
+  window.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+
+  // Water in glass
+  const innerRadius = glassRadius - glassThickness - 0.02;
+  const maxWaterHeight = glassHeight - 0.1;
+  let waterHeight = 0.05, waterMesh = null;
+
+  function updateWaterMesh() {
+    if (waterMesh) { scene.remove(waterMesh); waterMesh.geometry.dispose(); waterMesh.material.dispose(); }
+    const h = Math.max(0.01, waterHeight);
+    waterMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(innerRadius * (1 - h * 0.02 / glassHeight), innerRadius * 0.85, h, 64),
+      new THREE.MeshPhysicalMaterial({ color: 0x4fc3f7, metalness: 0, roughness: 0.1, transmission: 0.95, thickness: 0.8, transparent: true, opacity: 0.9, ior: 1.33 })
+    );
+    waterMesh.position.set(glass.position.x, h/2 + 0.05, glass.position.z);
+    waterMesh.castShadow = true;
+    scene.add(waterMesh);
+  }
+  updateWaterMesh();
+
+  function addWaterVolume(vol) {
+    waterHeight = Math.min(maxWaterHeight, waterHeight + vol / (Math.PI * innerRadius * innerRadius));
+    updateWaterMesh();
+  }
+
+  function checkGlassFull() {
+    if (waterHeight >= maxWaterHeight - 0.05) {
+      points += 10;
+      waterHeight = 0.05;
+      updateWaterMesh();
+      updateScore();
+    }
+  }
+
+  // Bottle
+  const bottle = new THREE.Group();
+  const bodyShape = new THREE.LatheGeometry([
+    new THREE.Vector2(0.15, 0), new THREE.Vector2(0.18, 0.1), new THREE.Vector2(0.2, 0.3),
+    new THREE.Vector2(0.19, 0.5), new THREE.Vector2(0.18, 0.7), new THREE.Vector2(0.16, 0.85),
+    new THREE.Vector2(0.14, 0.95), new THREE.Vector2(0.08, 1.0)
+  ], 48);
+  const body = new THREE.Mesh(bodyShape, new THREE.MeshPhysicalMaterial({
+    color: 0x89c4d9, metalness: 0, roughness: 0.3, transmission: 0.6, thickness: 0.3, transparent: true, opacity: 0.8, clearcoat: 0.5
+  }));
+  body.castShadow = true;
+  bottle.add(body);
+
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x2c5f7a, roughness: 0.4, metalness: 0.1 });
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.15, 32), capMat);
+  cap.position.y = 1.075;
+  bottle.add(cap);
+
+  for (let i = 0; i < 3; i++) {
+    const thread = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.008, 8, 32), capMat);
+    thread.rotation.x = Math.PI/2;
+    thread.position.y = 1.02 + i * 0.025;
+    bottle.add(thread);
+  }
+
+  const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.06, 24), capMat);
+  spout.position.y = 1.18;
+  bottle.add(spout);
+
+  const mouth = new THREE.Object3D();
+  mouth.position.set(0, 1.21, 0);
+  bottle.add(mouth);
+
+  const label = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.195, 0.195, 0.3, 48, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, roughness: 0.6 })
+  );
+  label.position.y = 0.5;
+  bottle.add(label);
+
+  bottle.position.set(0, 2.2, 0);
+  scene.add(bottle);
+
+  // Tilt bottle for realistic pouring (outlet pointing down)
+  const bottleTiltAngle = Math.PI * 0.55; // ~100 degrees - nearly upside down
+
+  // Bottle movement system
+  let bottleTargetX = 0, bottleTargetZ = 0;
+  let moveTimer = 0, moveInterval = 2;
+  let moveSpeed = 1.5;
+  const playArea = 2;
+
+  // Difficulty settings
+  const difficulties = {
+    easy: { speed: 1, interval: 3 },
+    medium: { speed: 2, interval: 1.5 },
+    hard: { speed: 3.5, interval: 0.8 }
+  };
+
+  document.getElementById('diffSelect').addEventListener('change', e => {
+    const d = difficulties[e.target.value];
+    moveSpeed = d.speed;
+    moveInterval = d.interval;
+  });
+
+  function pickNewTarget() {
+    bottleTargetX = (Math.random() - 0.5) * 2 * playArea;
+    bottleTargetZ = (Math.random() - 0.5) * 2 * playArea;
+  }
+  pickNewTarget();
+
+  function getMouthWorld() {
+    const pos = new THREE.Vector3(), quat = new THREE.Quaternion();
+    mouth.getWorldPosition(pos);
+    bottle.getWorldQuaternion(quat);
+    return { pos, dir: new THREE.Vector3(0, -1, 0).applyQuaternion(quat).normalize(), quat };
+  }
+
+  // Drops
+  const drops = [], maxDrops = 1200, dropRadius = 0.018;
+  const dropVolume = (4/3) * Math.PI * Math.pow(dropRadius, 3);
+  const dropGeom = new THREE.SphereGeometry(dropRadius, 12, 12);
+  const dropMat = new THREE.MeshPhysicalMaterial({ color: 0x4fc3f7, metalness: 0, roughness: 0.05, transmission: 0.98, thickness: 0.5, transparent: true, opacity: 0.95, ior: 1.33, clearcoat: 0.8 });
+  const dropPool = [];
+  for (let i = 0; i < maxDrops; i++) {
+    const m = new THREE.Mesh(dropGeom, dropMat);
+    m.visible = false;
+    m.castShadow = true;
+    scene.add(m);
+    dropPool.push(m);
+  }
+
+  function spawnDrop(pos, vel) {
+    const m = dropPool.find(x => !x.visible);
+    if (!m) return;
+    m.position.copy(pos);
+    m.scale.setScalar(0.8 + Math.random() * 0.4);
+    m.visible = true;
+    totalDropsSpawned++;
+    drops.push({ mesh: m, vel: vel.clone(), life: 0, counted: false, rotSpeed: new THREE.Vector3((Math.random()-0.5)*5,(Math.random()-0.5)*5,(Math.random()-0.5)*5) });
+  }
+
+  function createSplash(pos, intensity = 1) {
+    const cnt = Math.floor(5 + intensity * 8);
+    for (let i = 0; i < cnt; i++) {
+      const a = (i / cnt) * Math.PI * 2 + Math.random() * 0.5;
+      const s = (0.2 + Math.random() * 0.5) * intensity;
+      const upVel = 0.3 + Math.random() * 0.6 * intensity;
+      spawnDrop(pos.clone(), new THREE.Vector3(Math.cos(a) * s, upVel, Math.sin(a) * s));
+    }
+  }
+
+  // Physics - realistic fluid dynamics
+  const G = 9.81;
+  const gravity = new THREE.Vector3(0, -G, 0);
+  const airDrag = 0.02; // Air resistance coefficient
+  let pouring = true, spawnTimer = 0, lastTime = performance.now() / 1000;
+  const nozzleRadius = 0.04, nozzleArea = Math.PI * nozzleRadius * nozzleRadius;
+  let bottleWaterLevel = 0.85;
+  
+  // Stream coherence - drops near each other form a stream
+  const streamVelocity = new THREE.Vector3();
+
+  function animate() {
+    const now = performance.now() / 1000;
+    const dt = Math.min(now - lastTime, 0.033);
+    lastTime = now;
+    controls.update();
+
+    // Move bottle toward target
+    if (pouring) {
+      moveTimer += dt;
+      if (moveTimer >= moveInterval) { moveTimer = 0; pickNewTarget(); }
+
+      const dx = bottleTargetX - bottle.position.x;
+      const dz = bottleTargetZ - bottle.position.z;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+      if (dist > 0.05) {
+        const step = Math.min(moveSpeed * dt, dist);
+        bottle.position.x += (dx / dist) * step;
+        bottle.position.z += (dz / dist) * step;
+      }
+
+      // Update tilt direction - bottle mouth points toward movement direction and downward
+      const angle = Math.atan2(dz, dx);
+      bottle.rotation.set(0, 0, 0);
+      bottle.rotation.y = -angle;
+      bottle.rotateZ(bottleTiltAngle); // Tilt so mouth points down
+    }
+
+    // Spawn drops with realistic physics
+    if (pouring && waterHeight < maxWaterHeight - 0.05) {
+      const mouthData = getMouthWorld();
+      const bottleTop = new THREE.Vector3(0, bottleWaterLevel, 0);
+      bottle.localToWorld(bottleTop);
+      
+      // Torricelli's law: exit velocity based on fluid head pressure
+      const head = Math.max(0.1, bottleTop.y - mouthData.pos.y + 0.3);
+      const exitVel = Math.sqrt(2 * G * head) * 0.8;
+      
+      // Flow rate based on orifice equation
+      const flowRate = 0.62 * nozzleArea * exitVel; // 0.62 is discharge coefficient
+      const dropsPerSec = flowRate / dropVolume;
+      spawnTimer += dropsPerSec * dt;
+      
+      // Update stream velocity for coherent flow
+      streamVelocity.copy(mouthData.dir).multiplyScalar(exitVel);
+      
+      while (spawnTimer >= 1 && drops.length < maxDrops) {
+        // Spawn position with slight randomness simulating turbulence
+        const pos = mouthData.pos.clone();
+        const turbulence = 0.012;
+        pos.x += (Math.random() - 0.5) * turbulence;
+        pos.z += (Math.random() - 0.5) * turbulence;
+        
+        // Initial velocity - mostly following stream direction
+        const vel = streamVelocity.clone();
+        
+        // Add slight spread based on Reynolds number effect (turbulent vs laminar)
+        const spread = 0.08 + Math.random() * 0.05;
+        vel.x += (Math.random() - 0.5) * spread;
+        vel.z += (Math.random() - 0.5) * spread;
+        vel.y += (Math.random() - 0.5) * spread * 0.3;
+        
+        spawnDrop(pos, vel);
+        spawnTimer -= 1;
+      }
+    } else { spawnTimer = 0; }
+
+    // Update drops
+    const waterSurfaceY = waterMesh ? waterMesh.position.y + waterHeight/2 : 0.05;
+    const glassTopY = glassHeight + 0.05;
+
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i];
+      
+      // Realistic physics: gravity + air resistance (drag proportional to velocity squared)
+      const speed = d.vel.length();
+      const dragForce = airDrag * speed * speed;
+      const dragVec = d.vel.clone().normalize().multiplyScalar(-dragForce * dt);
+      
+      d.vel.addScaledVector(gravity, dt);
+      d.vel.add(dragVec);
+      
+      // Terminal velocity cap (water drops ~9 m/s)
+      if (d.vel.length() > 9) d.vel.setLength(9);
+      
+      d.mesh.position.addScaledVector(d.vel, dt);
+      d.life += dt;
+      
+      // Drops elongate as they fall (teardrop shape effect via scale)
+      const fallSpeed = Math.abs(d.vel.y);
+      const stretch = 1 + Math.min(0.5, fallSpeed * 0.05);
+      d.mesh.scale.set(1/Math.sqrt(stretch), stretch, 1/Math.sqrt(stretch));
+      d.mesh.scale.multiplyScalar(0.8 + Math.random() * 0.1);
+      
+      // Rotation
+      d.mesh.rotation.x += d.rotSpeed.x * dt;
+      d.mesh.rotation.y += d.rotSpeed.y * dt;
+      d.mesh.rotation.z += d.rotSpeed.z * dt;
+
+      if (d.mesh.position.y < glassTopY && !d.counted) {
+        const dx = d.mesh.position.x - glass.position.x;
+        const dz = d.mesh.position.z - glass.position.z;
+        const dist = Math.sqrt(dx*dx + dz*dz);
+        if (dist < innerRadius && d.mesh.position.y > 0.05) {
+          if (d.mesh.position.y <= waterSurfaceY + 0.08) {
+            addWaterVolume(dropVolume);
+            dropsCaught++;
+            d.counted = true;
+            updateScore();
+            checkGlassFull();
+            if (d.vel.length() > 1.5 && Math.random() < 0.25) {
+              createSplash(new THREE.Vector3(d.mesh.position.x, waterSurfaceY + 0.02, d.mesh.position.z), Math.min(2, d.vel.length() / 2));
+            }
+            d.mesh.visible = false;
+            drops.splice(i, 1);
+            continue;
+          }
+        } else if (d.mesh.position.y < 0.1 && !d.counted) {
+          dropsSpilled++;
+          d.counted = true;
+          updateScore();
+        }
+      }
+
+      if (d.life > 6 || d.mesh.position.y < -0.5) {
+        if (!d.counted) { dropsSpilled++; d.counted = true; updateScore(); }
+        d.mesh.visible = false;
+        drops.splice(i, 1);
+      }
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  // UI
+  document.getElementById('toggleBtn').addEventListener('click', () => {
+    pouring = !pouring;
+    document.getElementById('toggleBtn').textContent = pouring ? '⏸ Stop Pouring' : '▶ Start Pouring';
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    waterHeight = 0.05;
+    updateWaterMesh();
+    drops.forEach(d => d.mesh.visible = false);
+    drops.length = 0;
+    totalDropsSpawned = dropsCaught = dropsSpilled = points = 0;
+    updateScore();
+    bottle.position.set(0, 2.2, 0);
+    pickNewTarget();
+  });
+
+  console.log('🎮 Water Pouring Game loaded! Chase the bottle with your glass!');
+  </script>
+</body>
+</html>
